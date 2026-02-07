@@ -1,0 +1,55 @@
+[project]
+name = "robotheus"
+version = "0.1.0"
+description = "Multi-provider AI Prometheus exporter"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "thepetk", email = "thepetk@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "prometheus-client>=0.21,<1.0",
+    "httpx>=0.27,<1.0",
+    "structlog>=24.0,<26.0",
+]
+
+[project.scripts]
+robotheus = "robotheus.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-asyncio>=0.24,<1.0",
+    "pytest-cov>=5.0,<6.0",
+    "respx>=0.22,<1.0",
+    "ruff>=0.7,<1.0",
+    "ty>=0.0.1a0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pytest-asyncio]
+mode = "auto"
+
+[tool.ty.src]
+include = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
