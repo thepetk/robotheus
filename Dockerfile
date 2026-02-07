@@ -1,6 +1,6 @@
 FROM registry.access.redhat.com/ubi9/python-312:latest
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
