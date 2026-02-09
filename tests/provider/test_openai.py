@@ -223,3 +223,36 @@ class TestOpenAIProviderProjectNameCache:
         provider = OpenAIProvider(api_key="sk-test")
         assert await provider._resolve_project_name("") == "unknown"
         assert await provider._resolve_project_name("unknown") == "unknown"
+
+
+class TestOpenAIProviderForbidden:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_usage_endpoint_forbidden_returns_empty(
+        self,
+    ) -> "None":
+        for endpoint in [
+            "completions",
+            "embeddings",
+            "moderations",
+            "images",
+            "audio_speeches",
+            "audio_transcriptions",
+            "vector_stores",
+        ]:
+            respx.get(f"{OPENAI_BASE_URL}/usage/{endpoint}").mock(
+                return_value=httpx.Response(403)
+            )
+
+        provider = OpenAIProvider(api_key="sk-test")
+        records = await provider.fetch_usage(1000, 1060)
+        assert records == []
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_costs_forbidden_returns_empty(self) -> "None":
+        respx.get(f"{OPENAI_BASE_URL}/costs").mock(return_value=httpx.Response(403))
+
+        provider = OpenAIProvider(api_key="sk-test")
+        records = await provider.fetch_costs(1000, 1060)
+        assert records == []

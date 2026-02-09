@@ -105,7 +105,15 @@ class OpenAIProvider:
 
             logger.debug("openai_fetch_usage", url=url)
             resp = await self._client.get(url)
+
+            if resp.status_code == 403:
+                logger.debug(
+                    "openai_endpoint_forbidden",
+                    endpoint=endpoint_name,
+                )
+                return records
             resp.raise_for_status()
+
             data = resp.json()
 
             for bucket in data.get("data", []):
@@ -164,6 +172,11 @@ class OpenAIProvider:
 
             logger.debug("openai_fetch_costs", url=url)
             resp = await self._client.get(url)
+
+            if resp.status_code == 403:
+                logger.debug("openai_costs_forbidden")
+                return records
+
             resp.raise_for_status()
             data = resp.json()
 
