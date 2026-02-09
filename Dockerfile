@@ -11,4 +11,4 @@ RUN uv sync --frozen --no-dev
 
 EXPOSE 9185
 
-ENTRYPOINT ["uv", "run", "robotheus"]
+ENTRYPOINT [".venv/bin/robotheus"]
