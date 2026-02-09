@@ -178,6 +178,12 @@ class OpenAIProvider:
                 logger.debug("openai_costs_forbidden")
                 return records
 
+            if not resp.is_success:
+                logger.warning(
+                    "openai_costs_error",
+                    status=resp.status_code,
+                    body=resp.text,
+                )
             resp.raise_for_status()
             data = resp.json()
 
