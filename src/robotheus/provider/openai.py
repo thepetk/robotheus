@@ -9,15 +9,15 @@ logger = structlog.get_logger()
 
 OPENAI_BASE_URL = "https://api.openai.com/v1/organization"
 
-# each tuple is (url_path, human-readable_name)
-USAGE_ENDPOINTS: "list[tuple[str, str]]" = [
-    ("completions", "completions"),
-    ("embeddings", "embeddings"),
-    ("moderations", "moderations"),
-    ("images", "images"),
-    ("audio_speeches", "audio_speeches"),
-    ("audio_transcriptions", "audio_transcriptions"),
-    ("vector_stores", "vector_stores"),
+# each tuple is (url_path, human-readable_name, group_by)
+USAGE_ENDPOINTS: "list[tuple[str, str, str]]" = [
+    ("completions", "completions", "project_id,api_key_id,model"),
+    ("embeddings", "embeddings", "project_id,api_key_id,model"),
+    ("moderations", "moderations", "project_id,api_key_id,model"),
+    ("images", "images", "project_id,api_key_id,model"),
+    ("audio_speeches", "audio_speeches", "project_id,api_key_id,model"),
+    ("audio_transcriptions", "audio_transcriptions", "project_id,api_key_id,model"),
+    ("vector_stores", "vector_stores", "project_id"),
 ]
 
 
@@ -61,8 +61,8 @@ class OpenAIProvider:
         fetches usage from all OpenAI endpoints concurrently.
         """
         tasks = [
-            self._fetch_endpoint_usage(path, name, start_time, end_time)
-            for path, name in USAGE_ENDPOINTS
+            self._fetch_endpoint_usage(path, name, group_by, start_time, end_time)
+            for path, name, group_by in USAGE_ENDPOINTS
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -81,6 +81,7 @@ class OpenAIProvider:
         self,
         path: "str",
         endpoint_name: "str",
+        group_by: "str",
         start_time: "int",
         end_time: "int",
     ) -> "list[UsageRecord]":
@@ -97,7 +98,7 @@ class OpenAIProvider:
                 f"{OPENAI_BASE_URL}/usage/{path}"
                 f"?start_time={start_time}&end_time={end_time}"
                 f"&bucket_width=1m&limit=1440"
-                f"&group_by=project_id,api_key_id,model"
+                f"&group_by={group_by}"
             )
 
             if next_page:
@@ -165,7 +166,7 @@ class OpenAIProvider:
             url = (
                 f"{OPENAI_BASE_URL}/costs"
                 f"?start_time={start_time}&end_time={end_time}"
-                f"&group_by=project_id"
+                f"&bucket_width=1d&group_by=project_id"
             )
             if next_page:
                 url += f"&page={next_page}"
