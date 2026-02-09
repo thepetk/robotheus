@@ -3,9 +3,9 @@ from typing import Protocol, Sequence
 from robotheus.models import CostRecord, UsageRecord
 
 
-class UsageProvider(Protocol):
+class AIProvider(Protocol):
     """
-    UsageProvider stands as a common protocol that all
+    AIProvider stands as a common protocol that all
     AI providers must satisfy.
 
     Providers fetch usage and cost data for a specific
@@ -26,3 +26,5 @@ class UsageProvider(Protocol):
         start_time: "int",
         end_time: "int",
     ) -> "Sequence[CostRecord]": ...
+
+    async def close(self) -> "None": ...

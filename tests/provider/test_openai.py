@@ -66,7 +66,7 @@ class TestOpenAIProviderFetchUsage:
         assert record.provider == "openai"
         assert record.model == "gpt-4o"
         assert record.project == "My Project"
-        assert record.api_key == "key-1"
+        assert record.api_key_id == "key-1"
         assert record.input_tokens == 100
         assert record.output_tokens == 50
         assert record.request_count == 2

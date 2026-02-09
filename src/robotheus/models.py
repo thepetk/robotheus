@@ -13,14 +13,14 @@ class UsageRecord:
     # note - resolved project name, not raw ID
     project: "str"
     # API key identifier, not the secret itself
-    api_key: "str"
+    api_key_id: "str"
     input_tokens: "int"
     output_tokens: "int"
     request_count: "int"
     # unix timestamp marking the start of the time window
-    bucket_start: "int"
+    time_frame_start: "int"
     # unix timestamp marking the end of the time window
-    bucket_end: "int"
+    time_frame_end: "int"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +34,6 @@ class CostRecord:
     project: "str"
     amount_usd: "float"
     # unix timestamp marking the start of the time window
-    bucket_start: "int"
+    time_frame_start: "int"
     # unix timestamp marking the end of the time window
-    bucket_end: "int"
+    time_frame_end: "int"

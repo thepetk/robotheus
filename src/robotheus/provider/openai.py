@@ -23,7 +23,7 @@ USAGE_ENDPOINTS: "list[tuple[str, str]]" = [
 
 class OpenAIProvider:
     """
-    OpenAIProvider implements the UsageProvider protocol for OpenAI's API. It fetches
+    OpenAIProvider implements the AIProvider protocol for OpenAI's API. It fetches
     usage and cost data from OpenAI's usage and costs endpoints, handling pagination
     and caching project names for better readability in the records.
     """
@@ -31,16 +31,26 @@ class OpenAIProvider:
     def __init__(self, api_key: "str", org_id: "str" = "") -> "None":
         self._api_key = api_key
         self._org_id = org_id
+        headers: "dict[str, str]" = {"Authorization": f"Bearer {api_key}"}
+        if org_id:
+            headers["OpenAI-Organization"] = org_id
         self._client: "httpx.AsyncClient" = httpx.AsyncClient(
             timeout=10.0,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers=headers,
         )
         # caches: project_id -> project_name
         self._project_names: "dict[str, str]" = {}
+        self._project_lock: "asyncio.Lock" = asyncio.Lock()
 
     @property
     def name(self) -> "str":
         return "openai"
+
+    async def close(self) -> "None":
+        """
+        closes the underlying HTTP client.
+        """
+        await self._client.aclose()
 
     async def fetch_usage(
         self,
@@ -109,12 +119,12 @@ class OpenAIProvider:
                             provider="openai",
                             model=result.get("model") or "unknown",
                             project=project_name,
-                            api_key=api_key_id,
+                            api_key_id=api_key_id,
                             input_tokens=result.get("input_tokens", 0),
                             output_tokens=result.get("output_tokens", 0),
                             request_count=result.get("num_model_requests", 0),
-                            bucket_start=bucket["start_time"],
-                            bucket_end=bucket["end_time"],
+                            time_frame_start=bucket["start_time"],
+                            time_frame_end=bucket["end_time"],
                         )
                     )
 
@@ -168,8 +178,8 @@ class OpenAIProvider:
                             provider="openai",
                             project=project_name,
                             amount_usd=amount.get("value", 0.0),
-                            bucket_start=bucket["start_time"],
-                            bucket_end=bucket["end_time"],
+                            time_frame_start=bucket["start_time"],
+                            time_frame_end=bucket["end_time"],
                         )
                     )
 
@@ -184,24 +194,34 @@ class OpenAIProvider:
 
     async def _resolve_project_name(self, project_id: "str") -> "str":
         """
-        resolves project ID to human-readable name, with caching
+        resolves project ID to human-readable name, with caching.
+        Uses a lock to prevent duplicate HTTP calls when multiple
+        concurrent endpoints encounter the same project_id.
         """
         if project_id in ("", "unknown"):
             return "unknown"
 
+        # fast path: check cache without lock
         if project_id in self._project_names:
             return self._project_names[project_id]
 
-        try:
-            resp = await self._client.get(f"{OPENAI_BASE_URL}/projects/{project_id}")
+        async with self._project_lock:
+            # re-check after acquiring lock (another task may have resolved it)
+            if project_id in self._project_names:
+                return self._project_names[project_id]
 
-            if resp.status_code != 200:
+            try:
+                resp = await self._client.get(
+                    f"{OPENAI_BASE_URL}/projects/{project_id}"
+                )
+
+                if resp.status_code != 200:
+                    return "unknown"
+
+                name = str(resp.json().get("name", "unknown"))
+                self._project_names[project_id] = name
+                return name
+
+            except Exception:
+                logger.warning("openai_project_resolve_failed", project_id=project_id)
                 return "unknown"
-
-            name = str(resp.json().get("name", "unknown"))
-            self._project_names[project_id] = name
-            return name
-
-        except Exception:
-            logger.warning("openai_project_resolve_failed", project_id=project_id)
-            return "unknown"

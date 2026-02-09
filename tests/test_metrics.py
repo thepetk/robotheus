@@ -29,19 +29,19 @@ class TestMetricsUpdater:
             provider="openai",
             model="gpt-4o",
             project="my-project",
-            api_key="key-1",
+            api_key_id="key-1",
             input_tokens=100,
             output_tokens=50,
             request_count=3,
-            bucket_start=1000,
-            bucket_end=1060,
+            time_frame_start=1000,
+            time_frame_end=1060,
         )
         updater.update_usage(record)
 
         # check requests counter
         requests_value = registry.get_sample_value(
             "robotheus_openai_requests_total",
-            {"model": "gpt-4o", "project": "my-project", "api_key": "key-1"},
+            {"model": "gpt-4o", "project": "my-project", "api_key_id": "key-1"},
         )
         assert requests_value == 3.0
 
@@ -51,7 +51,7 @@ class TestMetricsUpdater:
             {
                 "model": "gpt-4o",
                 "project": "my-project",
-                "api_key": "key-1",
+                "api_key_id": "key-1",
                 "direction": "input",
             },
         )
@@ -63,7 +63,7 @@ class TestMetricsUpdater:
             {
                 "model": "gpt-4o",
                 "project": "my-project",
-                "api_key": "key-1",
+                "api_key_id": "key-1",
                 "direction": "output",
             },
         )
@@ -80,8 +80,8 @@ class TestMetricsUpdater:
             provider="openai",
             project="my-project",
             amount_usd=1.50,
-            bucket_start=1000,
-            bucket_end=1060,
+            time_frame_start=1000,
+            time_frame_end=1060,
         )
         updater.update_cost(record)
 
@@ -99,3 +99,35 @@ class TestMetricsUpdater:
         updater.register_provider("openai")
         # should not raise
         updater.register_provider("openai")
+
+    def test_self_metrics_are_created(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        MetricsUpdater(registry=registry)
+        metric_names = [m.name for m in registry.collect()]
+        assert "robotheus_scrape_duration_seconds" in metric_names
+        assert "robotheus_scrape_errors" in metric_names
+        assert "robotheus_last_scrape_success_timestamp_seconds" in metric_names
+
+    def test_self_metrics_update(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        updater = MetricsUpdater(registry=registry)
+
+        updater.observe_scrape_duration("openai", 0.5)
+        updater.inc_scrape_error("openai", "usage")
+        updater.set_last_scrape_success("openai", 1000.0)
+
+        error_val = registry.get_sample_value(
+            "robotheus_scrape_errors_total",
+            {"provider": "openai", "stage": "usage"},
+        )
+        assert error_val == 1.0
+
+        success_val = registry.get_sample_value(
+            "robotheus_last_scrape_success_timestamp_seconds",
+            {"provider": "openai"},
+        )
+        assert success_val == 1000.0
