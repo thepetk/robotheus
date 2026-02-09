@@ -158,6 +158,12 @@ class OpenAIProvider:
         """
         fetches cost data from the OpenAI Costs API.
         """
+        # costs use daily buckets, so we need at least a 1-day
+        # window. The RecordTracker prevents double-counting.
+        _SECONDS_IN_DAY = 86400
+        if end_time - start_time < _SECONDS_IN_DAY:
+            start_time = end_time - _SECONDS_IN_DAY
+
         records: "list[CostRecord]" = []
         next_page = ""
 
