@@ -75,45 +75,59 @@ class TestRecordTrackerUsage:
 
 
 class TestRecordTrackerCost:
-    def test_first_call_returns_true(self) -> "None":
+    def test_first_call_returns_full_amount(self) -> "None":
         store = RecordTracker()
-        assert (
-            store.is_new_cost(
-                provider="openai",
-                project="proj-1",
-                time_frame_start=1000,
-            )
-            is True
+        delta = store.cost_delta(
+            provider="openai",
+            project="proj-1",
+            time_frame_start=1000,
+            amount=5.0,
         )
+        assert delta == 5.0
 
-    def test_second_call_same_key_returns_false(self) -> "None":
+    def test_same_amount_returns_zero(self) -> "None":
         store = RecordTracker()
         kwargs = dict(
             provider="openai",
             project="proj-1",
             time_frame_start=1000,
+            amount=5.0,
         )
-        store.is_new_cost(**kwargs)
-        assert store.is_new_cost(**kwargs) is False
+        store.cost_delta(**kwargs)
+        assert store.cost_delta(**kwargs) == 0.0
+
+    def test_increased_amount_returns_delta(self) -> "None":
+        store = RecordTracker()
+        store.cost_delta(
+            provider="openai",
+            project="proj-1",
+            time_frame_start=1000,
+            amount=5.0,
+        )
+        delta = store.cost_delta(
+            provider="openai",
+            project="proj-1",
+            time_frame_start=1000,
+            amount=8.0,
+        )
+        assert delta == 3.0
 
     def test_different_projects_are_independent(self) -> "None":
         store = RecordTracker()
-        assert (
-            store.is_new_cost(
-                provider="openai",
-                project="proj-1",
-                time_frame_start=1000,
-            )
-            is True
+        d1 = store.cost_delta(
+            provider="openai",
+            project="proj-1",
+            time_frame_start=1000,
+            amount=5.0,
         )
-        assert (
-            store.is_new_cost(
-                provider="openai",
-                project="proj-2",
-                time_frame_start=1000,
-            )
-            is True
+        d2 = store.cost_delta(
+            provider="openai",
+            project="proj-2",
+            time_frame_start=1000,
+            amount=3.0,
         )
+        assert d1 == 5.0
+        assert d2 == 3.0
 
 
 class TestRecordTrackerEviction:

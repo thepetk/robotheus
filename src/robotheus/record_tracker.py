@@ -18,6 +18,7 @@ class RecordTracker:
     def __init__(self) -> "None":
         self._lock: "threading.Lock" = threading.Lock()
         self._seen: "dict[str, int]" = {}
+        self._cost_amounts: "dict[str, float]" = {}
 
     @staticmethod
     def _make_usage_key(
@@ -64,22 +65,24 @@ class RecordTracker:
             self._seen[key] = time_frame_start
             return True
 
-    def is_new_cost(
+    def cost_delta(
         self,
         provider: "str",
         project: "str",
         time_frame_start: "int",
-    ) -> "bool":
+        amount: "float",
+    ) -> "float":
         """
-        checks if the given cost time frame is new. If so, mark it as seen
-        and returns True.
+        returns the cost increment since the last time this time frame
+        was seen. Returns 0.0 if the amount hasn't changed.
         """
         key = self._make_cost_key(provider, project, time_frame_start)
         with self._lock:
-            if key in self._seen:
-                return False
             self._seen[key] = time_frame_start
-            return True
+            previous = self._cost_amounts.get(key, 0.0)
+            self._cost_amounts[key] = amount
+            delta = amount - previous
+            return max(delta, 0.0)
 
     def evict_before(self, cutoff: "int") -> "int":
         """
@@ -90,4 +93,5 @@ class RecordTracker:
             to_remove = [k for k, ts in self._seen.items() if ts < cutoff]
             for k in to_remove:
                 del self._seen[k]
+                self._cost_amounts.pop(k, None)
             return len(to_remove)

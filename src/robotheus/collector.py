@@ -129,12 +129,14 @@ class Collector:
                 if record.time_frame_end > now:
                     continue
 
-                if self._record_tracker.is_new_cost(
+                delta = self._record_tracker.cost_delta(
                     provider=record.provider,
                     project=record.project,
                     time_frame_start=record.time_frame_start,
-                ):
-                    self._metrics.update_cost(record)
+                    amount=record.amount_usd,
+                )
+                if delta > 0:
+                    self._metrics.update_cost(record, delta)
 
         except Exception:
             logger.exception("cost_fetch_error", provider=provider.name)

@@ -95,12 +95,15 @@ class MetricsUpdater:
             record.output_tokens
         )
 
-    def update_cost(self, record: "CostRecord") -> "None":
+    def update_cost(self, record: "CostRecord", delta: "float | None" = None) -> "None":
         """
         updates the cost counter based on the cost record's data.
+        If delta is provided, increments by that amount instead of
+        the full record amount.
         """
         metrics = self._provider_metrics[record.provider]
-        metrics["cost_usd_total"].labels(project=record.project).inc(record.amount_usd)
+        amount = delta if delta is not None else record.amount_usd
+        metrics["cost_usd_total"].labels(project=record.project).inc(amount)
 
     def observe_scrape_duration(
         self, provider: "str", duration_seconds: "float"
