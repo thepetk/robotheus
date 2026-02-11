@@ -203,7 +203,7 @@ class OpenAIProvider:
                         CostRecord(
                             provider="openai",
                             project=project_name,
-                            amount_usd=amount.get("value", 0.0),
+                            amount_usd=float(amount.get("value", 0.0)),
                             time_frame_start=bucket["start_time"],
                             time_frame_end=bucket["end_time"],
                         )
