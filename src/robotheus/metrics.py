@@ -6,15 +6,19 @@ from robotheus.models import CostRecord, UsageRecord
 def create_provider_metrics(
     provider: "str",
     registry: "CollectorRegistry" = REGISTRY,
-) -> "dict[str, Counter]":
+) -> "dict[str, Counter | Gauge]":
     """
-    creates the three metric families for a given provider.
+    creates the metric families for a given provider.
      - requests_total: counts total API requests, labeled
      by model, project, api_key_id.
      - tokens_total: counts total tokens used, labeled by
      model, project, api_key_id, direction (input/output).
-     - cost_usd_total: counts total cost in USD, labeled by
-     project.
+     - cost_usd_total: cumulative cost counter in USD, labeled by project.
+     - cost_usd_today: gauge for cost since midnight UTC today, labeled by project.
+     - cost_usd_week: gauge for cost over the last 7 days, labeled by project.
+     - cost_usd_month: gauge for cost over the last 30 days, labeled by project.
+     - cost_usd_daily: gauge for cost per calendar day (YYYY-MM-DD), labeled
+     by project and date — used for week/month time series dashboards.
     """
     return {
         "requests_total": Counter(
@@ -31,8 +35,32 @@ def create_provider_metrics(
         ),
         "cost_usd_total": Counter(
             f"robotheus_{provider}_cost_usd_total",
-            f"Total cost in USD for {provider}",
+            f"Total cost in USD for {provider} (cumulative since start)",
             ["project"],
+            registry=registry,
+        ),
+        "cost_usd_today": Gauge(
+            f"robotheus_{provider}_cost_usd_today",
+            f"Total cost in USD for {provider} since midnight UTC today",
+            ["project"],
+            registry=registry,
+        ),
+        "cost_usd_week": Gauge(
+            f"robotheus_{provider}_cost_usd_week",
+            f"Total cost in USD for {provider} over the last 7 days",
+            ["project"],
+            registry=registry,
+        ),
+        "cost_usd_month": Gauge(
+            f"robotheus_{provider}_cost_usd_month",
+            f"Total cost in USD for {provider} over the last 30 days",
+            ["project"],
+            registry=registry,
+        ),
+        "cost_usd_daily": Gauge(
+            f"robotheus_{provider}_cost_usd_daily",
+            f"Total cost in USD for {provider} for a specific calendar day",
+            ["project", "date"],
             registry=registry,
         ),
     }
@@ -40,12 +68,12 @@ def create_provider_metrics(
 
 class MetricsUpdater:
     """
-    applies UsageRecord/CostRecord data to Prometheus counters.
+    applies UsageRecord/CostRecord data to Prometheus counters and gauges.
     """
 
     def __init__(self, registry: "CollectorRegistry" = REGISTRY) -> "None":
         self._registry: "CollectorRegistry" = registry
-        self._provider_metrics: "dict[str, dict[str, Counter]]" = {}
+        self._provider_metrics: "dict[str, dict[str, Counter | Gauge]]" = {}
         self._scrape_duration: "Histogram" = Histogram(
             "robotheus_scrape_duration_seconds",
             "Duration of provider scrape cycles",
@@ -104,6 +132,38 @@ class MetricsUpdater:
         metrics = self._provider_metrics[record.provider]
         amount = delta if delta is not None else record.amount_usd
         metrics["cost_usd_total"].labels(project=record.project).inc(amount)
+
+    def set_cost_window(
+        self,
+        provider: "str",
+        project: "str",
+        window: "str",
+        amount: "float",
+    ) -> "None":
+        """
+        sets the cost gauge for a given time window.
+        window must be one of: "today", "week", "month".
+        """
+        metrics = self._provider_metrics[provider]
+        gauge = metrics[f"cost_usd_{window}"]
+        assert isinstance(gauge, Gauge)
+        gauge.labels(project=project).set(amount)
+
+    def set_cost_daily(
+        self,
+        provider: "str",
+        project: "str",
+        date: "str",
+        amount: "float",
+    ) -> "None":
+        """
+        sets the daily cost gauge for a specific date (YYYY-MM-DD).
+        Used to populate per-day time series for week/month dashboards.
+        """
+        metrics = self._provider_metrics[provider]
+        gauge = metrics["cost_usd_daily"]
+        assert isinstance(gauge, Gauge)
+        gauge.labels(project=project, date=date).set(amount)
 
     def observe_scrape_duration(
         self, provider: "str", duration_seconds: "float"

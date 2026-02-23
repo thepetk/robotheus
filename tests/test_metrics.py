@@ -131,3 +131,104 @@ class TestMetricsUpdater:
             {"provider": "openai"},
         )
         assert success_val == 1000.0
+
+    def test_register_provider_creates_window_metrics(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("openai")
+        metric_names = [m.name for m in registry.collect()]
+        assert "robotheus_openai_cost_usd_today" in metric_names
+        assert "robotheus_openai_cost_usd_week" in metric_names
+        assert "robotheus_openai_cost_usd_month" in metric_names
+        assert "robotheus_openai_cost_usd_daily" in metric_names
+
+    def test_set_cost_window_sets_all_three_windows(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("openai")
+
+        updater.set_cost_window("openai", "proj", "today", 5.0)
+        updater.set_cost_window("openai", "proj", "week", 20.0)
+        updater.set_cost_window("openai", "proj", "month", 80.0)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_openai_cost_usd_today", {"project": "proj"}
+            )
+            == 5.0
+        )
+        assert (
+            registry.get_sample_value(
+                "robotheus_openai_cost_usd_week", {"project": "proj"}
+            )
+            == 20.0
+        )
+        assert (
+            registry.get_sample_value(
+                "robotheus_openai_cost_usd_month", {"project": "proj"}
+            )
+            == 80.0
+        )
+
+    def test_set_cost_window_overwrites_previous_value(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("openai")
+
+        updater.set_cost_window("openai", "proj", "today", 5.0)
+        updater.set_cost_window("openai", "proj", "today", 7.5)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_openai_cost_usd_today", {"project": "proj"}
+            )
+            == 7.5
+        )
+
+    def test_set_cost_daily_sets_gauge(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("openai")
+
+        updater.set_cost_daily("openai", "proj", "2026-02-23", 3.0)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_openai_cost_usd_daily",
+                {"project": "proj", "date": "2026-02-23"},
+            )
+            == 3.0
+        )
+
+    def test_set_cost_daily_multiple_dates_are_independent(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("openai")
+
+        updater.set_cost_daily("openai", "proj", "2026-02-22", 4.0)
+        updater.set_cost_daily("openai", "proj", "2026-02-23", 6.0)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_openai_cost_usd_daily",
+                {"project": "proj", "date": "2026-02-22"},
+            )
+            == 4.0
+        )
+        assert (
+            registry.get_sample_value(
+                "robotheus_openai_cost_usd_daily",
+                {"project": "proj", "date": "2026-02-23"},
+            )
+            == 6.0
+        )
