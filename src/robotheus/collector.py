@@ -166,7 +166,7 @@ class Collector:
 
         # adding some throttle here just in case as cost metrics from
         # the provider side are not updated so frequently.
-        if elapsed >= self._window_interval:
+        if elapsed >= self._window_interval and self._known_projects.get(provider.name):
             try:
                 await self._collect_cost_windows(provider)
                 self._last_window_scrape[provider.name] = now
