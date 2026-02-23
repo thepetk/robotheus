@@ -19,7 +19,14 @@ def parse_args(argv: "list[str] | None" = None) -> "Config":
         dest="scrape_interval",
         type=int,
         default=60,
-        help="Scrape interval in seconds (default: 60)",
+        help="Usage scrape interval in seconds (default: 60)",
+    )
+    parser.add_argument(
+        "--cost.window-interval",
+        dest="cost_window_interval",
+        type=int,
+        default=1800,
+        help="Cost window refresh interval in seconds (default: 1800)",
     )
     parser.add_argument(
         "--log.level",
@@ -33,5 +40,6 @@ def parse_args(argv: "list[str] | None" = None) -> "Config":
     config = Config.from_env()
     config.listen_address = args.listen_address
     config.scrape_interval = args.scrape_interval
+    config.cost_window_interval = args.cost_window_interval
     config.log_level = args.log_level
     return config

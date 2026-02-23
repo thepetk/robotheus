@@ -12,15 +12,17 @@ Currently supported providers:
 
 ## Metrics
 
-All metrics are Prometheus counters.
-
 ### OpenAI
 
-| Metric                            | Labels                               | Description                                   |
-| --------------------------------- | ------------------------------------ | --------------------------------------------- |
-| `robotheus_openai_requests_total` | `model, project, api_key`            | Total API requests                            |
-| `robotheus_openai_tokens_total`   | `model, project, api_key, direction` | Total tokens (direction: `input` or `output`) |
-| `robotheus_openai_cost_usd_total` | `project`                            | Total cost in USD                             |
+| Metric                               | Type    | Labels             | Description                                             |
+| ------------------------------------ | ------- | ------------------ | ------------------------------------------------------- |
+| `robotheus_openai_requests_total`    | Counter | `model, project, api_key_id` | Total API requests                            |
+| `robotheus_openai_tokens_total`      | Counter | `model, project, api_key_id, direction` | Total tokens (`direction`: `input` or `output`) |
+| `robotheus_openai_cost_usd_total`    | Counter | `project`          | Cumulative cost in USD since exporter start             |
+| `robotheus_openai_cost_usd_today`    | Gauge   | `project`          | Cost in USD since midnight UTC today                    |
+| `robotheus_openai_cost_usd_week`     | Gauge   | `project`          | Cost in USD over the last 7 days                        |
+| `robotheus_openai_cost_usd_month`    | Gauge   | `project`          | Cost in USD over the last 30 days                       |
+| `robotheus_openai_cost_usd_daily`    | Gauge   | `project, date`    | Cost in USD per calendar day (`date`: `YYYY-MM-DD`), used for week/month time series panels |
 
 ## Quickstart
 
@@ -38,11 +40,12 @@ uv run robotheus
 
 ### CLI flags
 
-| Flag                   | Default | Description                                     |
-| ---------------------- | ------- | ----------------------------------------------- |
-| `--web.listen-address` | `:9185` | Listen address                                  |
-| `--scrape.interval`    | `60`    | Collection interval in seconds                  |
-| `--log.level`          | `info`  | Log level (`debug`, `info`, `warning`, `error`) |
+| Flag                      | Default | Description                                                                 |
+| ------------------------- | ------- | --------------------------------------------------------------------------- |
+| `--web.listen-address`    | `:9185` | Listen address                                                              |
+| `--scrape.interval`       | `60`    | Usage scrape interval in seconds                                            |
+| `--cost.window-interval`  | `1800`  | How often to refresh the cost window gauges (today/week/month) in seconds   |
+| `--log.level`             | `info`  | Log level (`debug`, `info`, `warning`, `error`)                             |
 
 ### Environment variables
 

@@ -1,3 +1,4 @@
+import datetime
 import time
 
 import pytest
@@ -254,6 +255,282 @@ class TestCollector:
 
         # should not raise
         await collector._collect_provider(provider, 0, 60, int(time.time()))
+
+    @pytest.mark.asyncio
+    async def test_collect_cost_windows_aggregates_by_window(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        today = datetime.datetime.now(datetime.timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        today_start = int(today.timestamp())
+
+        costs = [
+            # today — inside all three windows
+            CostRecord(
+                provider="mock",
+                project="proj",
+                amount_usd=5.0,
+                time_frame_start=today_start,
+                time_frame_end=today_start + 86400,
+            ),
+            # yesterday — inside week and month, not today
+            CostRecord(
+                provider="mock",
+                project="proj",
+                amount_usd=3.0,
+                time_frame_start=today_start - 86400,
+                time_frame_end=today_start,
+            ),
+            # 8 days ago — inside month only
+            CostRecord(
+                provider="mock",
+                project="proj",
+                amount_usd=2.0,
+                time_frame_start=today_start - 8 * 86400,
+                time_frame_end=today_start - 7 * 86400,
+            ),
+        ]
+
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("mock")
+        provider = MockProvider([], costs)
+        collector = Collector([provider], updater, RecordTracker())
+
+        await collector._collect_cost_windows(provider)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_mock_cost_usd_today", {"project": "proj"}
+            )
+            == 5.0
+        )
+        assert (
+            registry.get_sample_value(
+                "robotheus_mock_cost_usd_week", {"project": "proj"}
+            )
+            == 8.0
+        )
+        assert (
+            registry.get_sample_value(
+                "robotheus_mock_cost_usd_month", {"project": "proj"}
+            )
+            == 10.0
+        )
+
+    @pytest.mark.asyncio
+    async def test_collect_cost_windows_sets_daily_gauge(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        today = datetime.datetime.now(datetime.timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        today_start = int(today.timestamp())
+        today_str = today.strftime("%Y-%m-%d")
+        yesterday_str = (today - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
+        costs = [
+            CostRecord(
+                provider="mock",
+                project="proj",
+                amount_usd=5.0,
+                time_frame_start=today_start,
+                time_frame_end=today_start + 86400,
+            ),
+            CostRecord(
+                provider="mock",
+                project="proj",
+                amount_usd=3.0,
+                time_frame_start=today_start - 86400,
+                time_frame_end=today_start,
+            ),
+        ]
+
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("mock")
+        provider = MockProvider([], costs)
+        collector = Collector([provider], updater, RecordTracker())
+
+        await collector._collect_cost_windows(provider)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_mock_cost_usd_daily",
+                {"project": "proj", "date": today_str},
+            )
+            == 5.0
+        )
+        assert (
+            registry.get_sample_value(
+                "robotheus_mock_cost_usd_daily",
+                {"project": "proj", "date": yesterday_str},
+            )
+            == 3.0
+        )
+
+    @pytest.mark.asyncio
+    async def test_collect_cost_windows_zeros_known_projects_with_no_data(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("mock")
+        provider = MockProvider([], [])
+        collector = Collector([provider], updater, RecordTracker())
+
+        # simulate projects already seen from usage records
+        collector._known_projects["mock"] = {"proj-a", "proj-b"}
+
+        await collector._collect_cost_windows(provider)
+
+        for project in ("proj-a", "proj-b"):
+            assert (
+                registry.get_sample_value(
+                    "robotheus_mock_cost_usd_today", {"project": project}
+                )
+                == 0.0
+            )
+            assert (
+                registry.get_sample_value(
+                    "robotheus_mock_cost_usd_week", {"project": project}
+                )
+                == 0.0
+            )
+            assert (
+                registry.get_sample_value(
+                    "robotheus_mock_cost_usd_month", {"project": project}
+                )
+                == 0.0
+            )
+
+    @pytest.mark.asyncio
+    async def test_window_collection_throttled_within_interval(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        now = int(time.time())
+        today_start = int(
+            datetime.datetime.now(datetime.timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp()
+        )
+
+        costs = [
+            CostRecord(
+                provider="mock",
+                project="proj",
+                amount_usd=5.0,
+                time_frame_start=today_start,
+                time_frame_end=today_start + 86400,
+            ),
+        ]
+
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("mock")
+        provider = MockProvider([], costs)
+        collector = Collector(
+            [provider], updater, RecordTracker(), cost_window_interval_seconds=1800
+        )
+
+        # last scrape happened 100s ago — interval not yet elapsed
+        collector._last_window_scrape["mock"] = now - 100
+
+        await collector._collect_provider(provider, now - 60, now, now)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_mock_cost_usd_today", {"project": "proj"}
+            )
+            is None
+        )
+
+    @pytest.mark.asyncio
+    async def test_window_collection_runs_after_interval(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        now = int(time.time())
+        today_start = int(
+            datetime.datetime.now(datetime.timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp()
+        )
+
+        costs = [
+            CostRecord(
+                provider="mock",
+                project="proj",
+                amount_usd=5.0,
+                time_frame_start=today_start,
+                time_frame_end=today_start + 86400,
+            ),
+        ]
+
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("mock")
+        provider = MockProvider([], costs)
+        collector = Collector(
+            [provider], updater, RecordTracker(), cost_window_interval_seconds=1800
+        )
+
+        # last scrape happened 1801s ago — interval has elapsed
+        collector._last_window_scrape["mock"] = now - 1801
+
+        await collector._collect_provider(provider, now - 60, now, now)
+
+        assert (
+            registry.get_sample_value(
+                "robotheus_mock_cost_usd_today", {"project": "proj"}
+            )
+            == 5.0
+        )
+
+    @pytest.mark.asyncio
+    async def test_known_projects_populated_from_usage_and_cost_records(
+        self,
+        registry: "CollectorRegistry",
+    ) -> "None":
+        now = int(time.time())
+        past_end = now - 10
+
+        usage = [
+            UsageRecord(
+                provider="fake",
+                model="gpt-4o",
+                project="proj-from-usage",
+                api_key_id="key",
+                input_tokens=10,
+                output_tokens=5,
+                request_count=1,
+                time_frame_start=past_end - 60,
+                time_frame_end=past_end,
+            ),
+        ]
+        costs = [
+            CostRecord(
+                provider="fake",
+                project="proj-from-cost",
+                amount_usd=1.0,
+                time_frame_start=past_end - 60,
+                time_frame_end=past_end,
+            ),
+        ]
+
+        updater = MetricsUpdater(registry=registry)
+        updater.register_provider("fake")
+        provider = MockProvider(usage, costs)
+        collector = Collector([provider], updater, RecordTracker())
+
+        # prevent window collection (needs "mock" registered separately)
+        collector._last_window_scrape["mock"] = now
+
+        await collector._collect_provider(provider, past_end - 60, past_end, now)
+
+        seen = collector._known_projects.get("mock", set())
+        assert "proj-from-usage" in seen
+        assert "proj-from-cost" in seen
 
     @pytest.mark.asyncio
     async def test_provider_error_increments_scrape_error_metric(

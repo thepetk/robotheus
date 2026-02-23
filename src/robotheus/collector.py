@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import time
 
 import structlog
@@ -11,6 +12,9 @@ logger = structlog.get_logger()
 
 # keep tracked entries for 1 hour by default
 _DEFAULT_EVICTION_AGE_SECONDS = 3600
+
+# cost window gauges cover a 30-day range — no need to refresh every cycle
+_DEFAULT_WINDOW_INTERVAL_SECONDS = 1800
 
 
 class Collector:
@@ -28,13 +32,21 @@ class Collector:
         metrics_updater: "MetricsUpdater",
         record_tracker: "RecordTracker",
         scrape_interval_seconds: "int" = 60,
+        cost_window_interval_seconds: "int" = _DEFAULT_WINDOW_INTERVAL_SECONDS,
     ) -> "None":
         self._providers = providers
         self._metrics = metrics_updater
         self._record_tracker = record_tracker
         self._interval = scrape_interval_seconds
+        self._window_interval = cost_window_interval_seconds
         self._last_scrape: "int" = 0
         self._stop_event: "asyncio.Event" = asyncio.Event()
+        # tracks every project name seen per provider so window gauges
+        # can be zeroed out when the cost API returns no data
+        self._known_projects: "dict[str, set[str]]" = {}
+        # unix timestamp of the last window scrape per provider;
+        # 0 forces a run on the first cycle
+        self._last_window_scrape: "dict[str, float]" = {}
 
     def stop(self) -> "None":
         """
@@ -103,6 +115,9 @@ class Collector:
             usage_records = await provider.fetch_usage(start_time, end_time)
 
             for record in usage_records:
+                self._known_projects.setdefault(provider.name, set()).add(
+                    record.project
+                )
                 # skip time frames that haven't completed yet
                 if record.time_frame_end > now:
                     continue
@@ -126,6 +141,9 @@ class Collector:
         try:
             cost_records = await provider.fetch_costs(start_time, end_time)
             for record in cost_records:
+                self._known_projects.setdefault(provider.name, set()).add(
+                    record.project
+                )
                 if record.time_frame_end > now:
                     continue
 
@@ -143,8 +161,84 @@ class Collector:
             self._metrics.inc_scrape_error(provider.name, "cost")
             had_error = True
 
+        # update window-based cost gauges
+        elapsed = now - self._last_window_scrape.get(provider.name, 0)
+
+        # adding some throttle here just in case as cost metrics from
+        # the provider side are not updated so frequently.
+        if elapsed >= self._window_interval:
+            try:
+                await self._collect_cost_windows(provider)
+                self._last_window_scrape[provider.name] = now
+            except Exception:
+                logger.exception("cost_windows_error", provider=provider.name)
+                self._metrics.inc_scrape_error(provider.name, "cost_windows")
+
         duration = time.monotonic() - cycle_start
         self._metrics.observe_scrape_duration(provider.name, duration)
 
         if not had_error:
             self._metrics.set_last_scrape_success(provider.name, time.time())
+
+    async def _collect_cost_windows(
+        self,
+        provider: "AIProvider",
+    ) -> "None":
+        """
+        fetches the last 30 days of cost data and sets window gauges:
+        cost_usd_total, cost_usd_today, cost_usd_week, cost_usd_month,
+        and cost_usd_daily.
+        """
+        today = datetime.datetime.now(datetime.timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        today_start = int(today.timestamp())
+        today_end = today_start + 86400
+        week_start = today_start - 7 * 86400
+        month_start = today_start - 30 * 86400
+
+        records = await provider.fetch_costs(month_start, today_end)
+
+        today_totals: "dict[str, float]" = {}
+        week_totals: "dict[str, float]" = {}
+        month_totals: "dict[str, float]" = {}
+        # date string (YYYY-MM-DD) -> project -> total amount
+        daily_totals: "dict[str, dict[str, float]]" = {}
+
+        for record in records:
+            p = record.project
+            day_str = datetime.datetime.fromtimestamp(
+                record.time_frame_start, tz=datetime.timezone.utc
+            ).strftime("%Y-%m-%d")
+
+            day_bucket = daily_totals.setdefault(day_str, {})
+            day_bucket[p] = day_bucket.get(p, 0.0) + record.amount_usd
+
+            if record.time_frame_start >= today_start:
+                today_totals[p] = today_totals.get(p, 0.0) + record.amount_usd
+            if record.time_frame_start >= week_start:
+                week_totals[p] = week_totals.get(p, 0.0) + record.amount_usd
+            month_totals[p] = month_totals.get(p, 0.0) + record.amount_usd
+
+        # include every project ever seen so that missing data shows as 0
+        all_projects = (
+            self._known_projects.get(provider.name, set())
+            | set(today_totals)
+            | set(week_totals)
+            | set(month_totals)
+        )
+
+        for project in all_projects:
+            self._metrics.set_cost_window(
+                provider.name, project, "today", today_totals.get(project, 0.0)
+            )
+            self._metrics.set_cost_window(
+                provider.name, project, "week", week_totals.get(project, 0.0)
+            )
+            self._metrics.set_cost_window(
+                provider.name, project, "month", month_totals.get(project, 0.0)
+            )
+
+        for day_str, project_amounts in daily_totals.items():
+            for project, amount in project_amounts.items():
+                self._metrics.set_cost_daily(provider.name, project, day_str, amount)

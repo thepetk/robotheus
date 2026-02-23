@@ -53,7 +53,11 @@ def main() -> "None":
     logger.info("metrics_server_started", host=host, port=port)
 
     collector = Collector(
-        providers, metrics_updater, record_tracker, config.scrape_interval
+        providers,
+        metrics_updater,
+        record_tracker,
+        config.scrape_interval,
+        config.cost_window_interval,
     )
 
     async def _run() -> "None":
